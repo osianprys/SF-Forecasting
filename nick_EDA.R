@@ -44,6 +44,25 @@ if(!require(tseries)){
 }
 library(tseries)
 
+
+# Functions ---------------------------------------------------------------
+
+create_test_train <- function(ts, h = 1){
+  dates = as.Date(time(sf_tradeplus_ts))
+  min_date = min(dates)
+  max_date = max(dates)
+  list(holdout = tail(ts, h),
+       train = ts(ts,
+                  frequency = 12,
+                  start = c(year(min_date),
+                            month(min_date)),
+                  end = c(year(max_date - months(h)),
+                          month(max_date - months(h)))))
+}
+
+
+
+
 # Data import -------------------------------------------------------------
 
 
@@ -113,7 +132,7 @@ dat$date <- ymd(dat$date)
 
 # Creating time series ----------------------------------------------------
 
-# Ordering data 
+# Ordering data (migrate to SQL)
 
 dat <- dat %>%
        arrange(date)
@@ -126,7 +145,7 @@ min_date <- min(dat$date)
 max_date <- max(dat$date)
 
 
-sf_tradepluse_ts = ts(data = dat$sum,
+sf_tradeplus_ts = ts(data = dat$sum,
                       start = c(year(min_date), month(min_date)),
                       end = c(year(max_date), month(max_date)),
                       frequency = 12)
@@ -138,7 +157,7 @@ sf_tradepluse_ts = ts(data = dat$sum,
 
 
 # Raw sales plot - notice trend/seasonality/variance
-plot.xts(as.xts(sf_tradepluse_ts/1E6),
+plot.xts(as.xts(sf_tradeplus_ts/1E6),
          type = "o",
          ylab = "Sum of Sales [£m]",
          xlab = "Date",
@@ -161,8 +180,83 @@ plot.xts(as.xts(log10(sf_tradepluse_ts/1E6)),
          main = "Tradeplus Sales Over Time")
 
 
-# Diff log sales plot - looks stationary
+# log sales plot - notice trend/seasonality/variance
 plot.xts(as.xts(diff(log10(sf_tradepluse_ts/1E6))),
+         type = "o",
+         ylab = "Sum of Sales [£m]",
+         xlab = "Date",
+         main = "Tradeplus Sales Over Time")
+
+
+
+
+boxplot(sf_tradeplus_ts~cycle(sf_tradeplus_ts))
+
+
+
+###
+
+zones=matrix(c(1,2), ncol=2, byrow=TRUE)
+
+layout(zones, widths=c(4/5, 1/5))
+
+diff_hist <- hist(diff(as.xts(sf_tradeplus_ts/1000)), 
+                 plot = FALSE,
+                 15)
+
+top = max(c(diff_hist$counts))
+
+par(mar=c(4,4,3,0))
+plot.xts(diff(as.xts(sf_tradeplus_ts/1000)),
+         type = "b",
+         ylab = "Sum of Order Value [£m]",
+         xlab = "Date",
+         main = "Tradeplus Sum of Orders Differenced")
+
+par(mar=c(4,0,3,1))
+barplot(diff_hist$counts, axes=FALSE, xlim=c(0, top), space=0, horiz=TRUE)
+par(oma=c(3,3,0,0))
+
+
+###
+
+
+###
+
+zones=matrix(c(1,2), ncol=2, byrow=TRUE)
+
+layout(zones, widths=c(4/5, 1/5))
+
+diff_hist <- hist(diff(log10(as.xts(sf_tradeplus_ts/1E6))), 
+                  plot = FALSE,
+                  15)
+
+top = max(c(diff_hist$counts))
+
+par(mar=c(4,4,3,0))
+plot.xts(diff(log10(as.xts(sf_tradeplus_ts/1E6))),
+         type = "b",
+         ylab = "Sum of Order Value [£m]",
+         xlab = "Date",
+         main = "Tradeplus Sum of Orders Differenced")
+
+par(mar=c(4,0,3,1))
+barplot(diff_hist$counts, axes=FALSE, xlim=c(0, top), space=0, horiz=TRUE)
+par(oma=c(3,3,0,0))
+
+
+###
+
+monthplot(sf_tradeplus_ts)
+seasonplot(sf_tradeplus_ts)
+
+autoplot(stl(sf_tradeplus_ts/1E6,
+         s.window = 'periodic')) + geom_point()
+
+
+
+# Diff log sales plot - looks stationary
+plot.xts(as.xts(diff(log10(sf_tradeplus_ts/1E6))),
          type = "o",
          ylab = "Sum of Sales [£m]",
          xlab = "Date",
@@ -170,26 +264,41 @@ plot.xts(as.xts(diff(log10(sf_tradepluse_ts/1E6))),
 
 # Testing stationarity
 
-adf_raw <-  adf.test(sf_tradepluse_ts, 
+adf_raw <-  adf.test(sf_tradeplus_ts, 
                      alternative = "stationary")
 
-adf_diff <- adf.test(diff(sf_tradepluse_ts), 
+adf_diff <- adf.test(diff(sf_tradeplus_ts), 
                      alternative = "stationary")
 
-adf_diff_log <- adf.test(diff(log10(sf_tradepluse_ts)), 
+adf_diff_log <- adf.test(diff(log10(sf_tradeplus_ts)), 
                          alternative = "stationary")
 
 
 
 
-# ACF ? PACF
+# ACF / PACF
 
-acf(sf_tradepluse_ts)
-acf(diff(sf_tradepluse_ts))
+acf(sf_tradeplus_ts)
+acf(diff(sf_tradeplus_ts))
 
-pacf(sf_tradepluse_ts)
-pacf(diff(sf_tradepluse_ts))
+pacf(sf_tradeplus_ts)
+pacf(diff(sf_tradeplus_ts))
 
 
 
+
+# quick fit
+
+samples <- create_test_train(sf_tradeplus_ts, 15)
+
+
+fit <- auto.arima(samples$train)
+
+pred = predict(fit, n.ahead = 15)
+
+ts.plot(samples$train, pred$pred, samples$holdout, lty = c(1, 3, 5))
+
+
+accuracy(f = pred$pred, 
+         x = samples$holdout)
 
