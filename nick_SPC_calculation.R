@@ -54,6 +54,26 @@ runSPCQuery <- function(start, end, conn){
 
 
 
+buildNBaseQuery <- function(start, end){
+  qry <- paste("select
+               count(distinct rp_person_id) as customers
+               from sf_analytics.prod_order
+               where
+               cal_submit_date between '", start, "' and '",  end,"' 
+               and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
+  qry
+}
+
+runNBaseQuery <- function(start, end, conn){
+  qry <- buildNBaseQuery(start, end)
+  res <- dbGetQuery(conn, qry)
+  res$start <- start
+  res$end <- end
+  res
+}
+
+
+
 # Load credentials for your own Redshift login.
 file <- paste0(getwd()[-2],"/credentials/my_credentials.csv")
 my_credentials <- read.csv(file, header = TRUE, sep = ",")
@@ -119,4 +139,8 @@ test <- map2(start_date, end_date, ~runSPCQuery(.x, .y, conn)) %>% reduce(rbind)
 toc()
 
 
-spc_ts = 
+
+
+tic()
+test2 <- map2(start_date, end_date, ~runNBaseQuery(.x, .y, conn)) %>% reduce(rbind)
+tic()
