@@ -1,0 +1,174 @@
+---
+title: "SF Forecasting"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r include=FALSE}
+# Database Connect --------------------------------------------------------
+
+## Install Packages
+
+### Redshift
+
+if(!require(DBI)) {
+  install.packages("DBI")
+  library(RPostgres)
+}
+
+if(!require(RPostgreSQL)) {
+  install.packages("RPostgreSQL")
+  library(RPostgreSQL)
+}
+
+if(!require(redshiftTools)) {
+  install.packages("redshiftTools")
+library(redshiftTools)
+}
+  
+library("aws.s3")
+
+### Forecast
+
+if(!require(lubridate)) {
+  install.packages("lubridate")
+  library(lubridate)
+}
+
+if(!require(forecast)) {
+  install.packages("forecast")
+  library(forecast)
+}
+
+if(!require(xts)){
+  install.packages("xts")
+  library(xts)
+}
+
+if(!require(tseries)){
+  install.packages("tseries")
+  library(tseries)
+}
+
+### General
+
+if(!require(tidyverse)){
+  install.packages("tidyverse")
+  library(tidyverse)
+}
+
+# Functions ---------------------------------------------------------------
+
+create_test_train <- function(ts, h = 1){
+  dates = as.Date(time(ts))
+  min_date = min(dates)
+  max_date = max(dates)
+  list(holdout = tail(ts, h),
+       train = ts(ts,
+                  frequency = 12,
+                  start = c(year(min_date),
+                            month(min_date)),
+                  end = c(year(max_date - months(h)),
+                          month(max_date - months(h)))))
+}
+
+
+# Data Import -------------------------------------------------------------
+
+# Load credentials for your own Redshift login
+file <- paste("Z:\\User Output\\sf_odavies\\R WD\\R to Redshift\\my_credentials.csv")
+my_credentials <- read.csv(file, header = TRUE, sep = ",")
+
+# Load the credentials into variables.
+port1 <- as.character(my_credentials[1,1])
+host1 <- as.character(my_credentials[1,2])
+user1 <- as.character(my_credentials[1,3])
+password1 <- as.character(my_credentials[1,4])
+dbname1 <- as.character(my_credentials[1,5])
+
+# Establish a connection with Redshift
+conn <- dbConnect(RPostgres::Postgres(), 
+                        host=host1, 
+                        port=port1, 
+                        user=user1, 
+                        password=password1, 
+                        dbname=dbname1, 
+                        sslmode='require')
+
+## Type SQL Query - Sum of Sales per Month per Customer
+
+query1 <- paste(
+  "select
+      left(cal_submit_date, 4) || '-' || substring(cal_submit_date, 6, 2) || '-28' as date,
+      sum(fulfilled_sales) as sales
+   from sf_analytics.prod_order
+   where 
+      cal_submit_date between dateadd(month, - 48, '2018-04-01') and '2018-03-31'
+      and rp_person_id > 0
+      and (kf_trade_split_validated = 'NTS'
+      or kf_trade_split_validated is null)
+   group by 1;"
+)
+
+```
+
+
+
+# Introduction
+
+This report details time series analysis of sales within TRADE+ customer group. The data are first sourced from the Redpoint:
+
+```{r}
+### Grab data
+dat <- dbGetQuery(conn, query1)
+
+### Convert string and order by date
+
+dat$date <- ymd(dat$date)
+
+dat <- dat %>%
+        arrange(date)
+
+### Max and Min Date
+
+min_date <- min(dat$date)
+max_date <- max(dat$date)
+
+head(dat)
+```
+
+After we re-order the data by date and extract the minimum and maximum date for our forecasting analysis. We can then represent this series in R using  `ts()`:
+```{r}
+sf_nts_ts <- ts(data = dat$sales,
+                start = c(year(min_date), month(min_date)),
+                end = c(year(max_date), month(max_date)),
+                frequency = 12)
+
+sf_nts_ts
+```
+
+Notice the function requires start date (in `c(year, month)` format) and frequency which is always number of obvservations in a year.
+
+To visualise the data we plot the time series:
+
+```{r}
+# Raw sales plot - notice trend/seasonality/variance
+plot.xts(as.xts(sf_nts_ts/1E6),
+         type = "o",
+         ylab = "Sum of Sales [£m]",
+         xlab = "Date",
+         main = "NTS Sales Over Time")
+```
+
+We notice a positive trend with sales increasing over time. Seasonality (repeated periodic trends) is also apparent with characteristic dips across Dec-Feb and peaks across Oct-Nov. We can use time-series decompostion to examine these features using `stl()`  
+
+```{r}
+autoplot(stl(sf_nts_ts/1E6,
+             s.window = 'periodic')) + geom_point()
+```
+
+These four plots represent the original data, the trend, the seasonality and the variance. These are important to consider as we commonly assume in many time series techniques (including ARIMA) is that the time series is stationary. This allows preserving model stability and provides a framework to 
+
+A stationary time series is one whose statistical properties such as mean, variance and correlation are all constant over time (i.e. to create the stationary time series, we need to minimise the trend, seasonality and variance). To 
+
