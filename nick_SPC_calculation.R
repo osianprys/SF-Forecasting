@@ -31,21 +31,32 @@ if(!requie(purrr)) {
 }
 library(purrr)
 
+if(!requie(zoo)) {
+  install.packages("zoo")
+}
+library(zoo)
+
+
 
 # Functions ---------------------------------------------------------------
 
-buildSPCQuery <- function(start, end){
+buildSPCQuery <- function(start, end, base = "TRADEPLUS"){
+  
+  bcodes <- switch(base,
+                   TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
+  
   qry <- paste(" select 
                     sum(fulfilled_sales)/ (count(distinct rp_person_id)) 
                       AS SPC
                       from 
                       sf_analytics.prod_order
-                      where cal_submit_date between '", start, "' and '", end,"' 
-                      and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
+                      where cal_submit_date between '", start, "' and '", end,
+                      "'", bcodes )
+  qry
 }
 
-runSPCQuery <- function(start, end, conn){
-  qry <- buildSPCQuery(start, end)
+runSPCQuery <- function(start, end, base = "TRADEPLUS" conn){
+  qry <- buildSPCQuery(start, end, base)
   res <- dbGetQuery(conn, qry)
   res$start <- start
   res$end <- end
@@ -54,17 +65,20 @@ runSPCQuery <- function(start, end, conn){
 
 
 
-buildNBaseQuery <- function(start, end){
+buildNBaseQuery <- function(start, end, base = "TRADEPLUS"){
+  bcodes <- switch(base,
+                   TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
+  
   qry <- paste("select
                count(distinct rp_person_id) as customers
                from sf_analytics.prod_order
                where
-               cal_submit_date between '", start, "' and '",  end,"' 
-               and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
+               cal_submit_date between '", start, "' and '",  end,
+               "'", bcodes )
   qry
 }
 
-runNBaseQuery <- function(start, end, conn){
+runNBaseQuery <- function(start, end, base = "TRADEPLUS", conn){
   qry <- buildNBaseQuery(start, end)
   res <- dbGetQuery(conn, qry)
   res$start <- start
@@ -109,17 +123,17 @@ end_date = seq.Date(from = ymd("2015-01-01"),
                      by = "month")
 
 
-# Year on Year
-
-start_date = seq.Date(from = ymd("2014-12-01"),
-                      to = ymd("2017-01-01"),
-                      by = "year")
-
-end_date = seq.Date(from = ymd("2015-12-01"),
-                    to = ymd("2018-01-01"),
-                    by = "year")
-
-
+# # Year on Year
+# 
+# start_date = seq.Date(from = ymd("2014-12-01"),
+#                       to = ymd("2017-01-01"),
+#                       by = "year")
+# 
+# end_date = seq.Date(from = ymd("2015-12-01"),
+#                     to = ymd("2018-01-01"),
+#                     by = "year")
+# 
+# 
 
 # Yearly Month on Month (comparing year on year for each month)
 
@@ -134,13 +148,83 @@ end_date = seq.Date(from = ymd("2015-12-01"),
 
 
 
-tic()
-test <- map2(start_date, end_date, ~runSPCQuery(.x, .y, conn)) %>% reduce(rbind)
-toc()
+
+SPC_data <- map2(start_date,
+                 end_date, ~runSPCQuery(.x, .y, conn)) %>% reduce(rbind)
 
 
 
 
-tic()
-test2 <- map2(start_date, end_date, ~runNBaseQuery(.x, .y, conn)) %>% reduce(rbind)
-tic()
+nBase_data <- map2(start_date,
+                   end_date, ~runNBaseQuery(.x, .y, conn)) %>% reduce(rbind)
+
+
+
+
+
+# Forecasting -------------------------------------------------------------
+
+
+create_test_train <- function(ts, dates, h = 15){
+  
+  min_date = min(dates)
+  max_date = max(dates)
+  list(holdout = tail(ts, h),
+       train = ts(ts,
+                  frequency = 12,
+                  start = c(year(min_date),
+                            month(min_date)),
+                  end = c(year(max_date - months(h)),
+                          month(max_date - months(h)))))
+}
+
+
+
+
+
+
+SPC_ts <- ts(SPC_data$spc,
+             start = c(year(min(SPC_data$end)),
+                       month(max(SPC_data$end))),
+             frequency = 12)
+
+nBase_ts <- ts(nBase_data$customers,
+               start = c(year(min(nBase_data$end)),
+                         month(max(nBase_data$end))),
+               frequency = 12)
+
+
+# SPC
+
+dates = zoo::as.Date(time(SPC_ts))
+
+samples <- create_test_train(SPC_ts, dates, h = 15)
+
+fit <- auto.arima(samples$train)
+
+pred = forecast(fit, h = 15)
+
+ts.plot(samples$train, pred$mean, samples$holdout, lty = c(1, 3, 5),
+        ylim = c(0, max(pred$mean, samples$train, samples$holdout)))
+
+
+accuracy(f = pred$mean, 
+         x = samples$holdout)
+
+
+#nBase
+
+
+dates = zoo::as.Date(time(nBase_ts))
+
+samples <- create_test_train(nBase_ts, dates, h = 6)
+
+fit <- auto.arima(samples$train)
+
+pred = forecast(fit, h = 6)
+
+ts.plot(samples$train, pred$mean, samples$holdout, lty = c(1, 3, 5))
+
+
+accuracy(f = pred$pred, 
+         x = samples$holdout)
