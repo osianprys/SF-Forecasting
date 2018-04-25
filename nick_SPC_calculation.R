@@ -341,3 +341,38 @@ plot <- plot + scale_x_date(labels = date_format("%m-%Y"))
 plot
 
 
+plot_frame_anim <- data.frame()
+for(i in 15:5){
+  samples <- create_test_train(nBase_ts, dates, h = i)
+  
+  fit <- auto.arima(samples$train)
+  
+  pred = forecast(fit, h = i)
+  
+  
+  plot_frame <- fcastdf(nBase_ts, pred)
+  plot_frame$run = i
+  
+  plot_frame_anim <- rbind(plot_frame_anim,
+                           plot_frame)
+  
+}
+
+
+
+plot <- ggplot(data = plot_frame,aes(x = date, y = observed))
+#plot <- plot + geom_line(size = 1.2)
+plot <- plot + geom_point(size = 2, aes(frame = run))
+# plot <- plot + geom_ribbon(aes(ymin = lo95, ymax = hi95),
+#                            alpha = 0.25,
+#                            fill = "blue")
+# plot <- plot + geom_ribbon(aes(ymin = lo80, ymax = hi80),
+#                            alpha = 0.25,
+#                            fill = "blue")
+# plot <- plot + geom_line(aes(y = forecast), colour = "blue", size = 1.2)
+# plot <- plot + geom_line(aes(y = holdout), colour = "red", size = 1.2)
+# 
+# plot <- plot + ylim(c(min(plot_frame$observed), max(plot_frame$forecast)))
+# plot <- plot + scale_x_date(labels = date_format("%m-%Y"))
+
+plot
