@@ -36,6 +36,8 @@ if(!requie(zoo)) {
 }
 library(zoo)
 
+library(scales)
+
 
 
 # Functions ---------------------------------------------------------------
@@ -63,8 +65,6 @@ runSPCQuery <- function(start, end, base = "TRADEPLUS" conn){
   res
 }
 
-
-
 buildNBaseQuery <- function(start, end, base = "TRADEPLUS"){
   bcodes <- switch(base,
                    TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
@@ -85,6 +85,54 @@ runNBaseQuery <- function(start, end, base = "TRADEPLUS", conn){
   res$end <- end
   res
 }
+
+
+# Function to create ggplot-friendly frame from forecast
+fcastdf <- function(dn, fcast){ 
+  require(zoo) # Needed for the 'as.yearmon()' function
+  
+  en <- min(time(fcast$mean)) # Extract the max date used in the forecast
+  
+  # Extract Training Data (ds) and hold out (dh)
+  ds <- as.data.frame(window(dn, end = en))
+  names(ds) <- "observed"
+  ds$date <- as.Date(time(window(dn, end = en)))
+  ds <- ds[-nrow(ds), ] # remove last obs (outside of training)
+  dh <- as.data.frame(window(dn, start = en))
+  names(dh) <- "holdout"
+  dh$date <- as.Date(window(dn, start = en))
+  
+  
+  # Extract the Fitted Values (need to figure out how to grab confidence intervals)
+  dfit <- as.data.frame(fcast$fitted)
+  dfit$date <- as.Date(time(fcast$fitted))
+  names(dfit)[1] <- 'fitted'
+  
+  ds <- merge(ds, dfit, all.x = TRUE) # Merge fitted values with source and training data
+  ds <- merge(ds, dh, all = TRUE)
+  
+  # Exract the Forecast values and confidence intervals
+  dfcastn <- as.data.frame(fcast)
+  dfcastn$date <- as.Date(as.yearmon(row.names(dfcastn)))
+  names(dfcastn) <- c('forecast','lo80','hi80','lo95','hi95','date')
+
+  range80 <- head(dfcastn$hi80, 1) - head(dfcastn$lo80, 1)
+  range95 <- head(dfcastn$hi95, 1) - head(dfcastn$lo95, 1)
+
+  # connection <- data.frame(forecast = tail(ds$observed, 1),
+  #                          lo80 = tail(ds$observed, 1) - range80/2,
+  #                          hi80 = tail(ds$observed, 1) + range80/2,
+  #                          lo95 = tail(ds$observed, 1) - range95/2,
+  #                          hi95 = tail(ds$observed, 1) + range95/2,
+  #                          date = tail(ds$date, 1))
+  # 
+  # pd <- merge(ds, connection, all = TRUE)
+  pd <- merge(ds, dfcastn, all = TRUE) # final data.frame for use in ggplot
+  return(pd)
+  
+}
+
+
 
 
 
@@ -212,19 +260,84 @@ accuracy(f = pred$mean,
          x = samples$holdout)
 
 
-#nBase
+# nBase
 
 
 dates = zoo::as.Date(time(nBase_ts))
 
-samples <- create_test_train(nBase_ts, dates, h = 6)
+samples <- create_test_train(nBase_ts, dates, h = 15)
 
 fit <- auto.arima(samples$train)
 
-pred = forecast(fit, h = 6)
+pred = forecast(fit, h = 15)
 
 ts.plot(samples$train, pred$mean, samples$holdout, lty = c(1, 3, 5))
 
 
 accuracy(f = pred$pred, 
          x = samples$holdout)
+
+
+# loop to show forecast performance
+
+pdf(file = "forecast_performance.pdf", width = 10, height = 6)
+dates = zoo::as.Date(time(nBase_ts))
+plotList <- list()
+for(i in 15:5){
+  samples <- create_test_train(nBase_ts, dates, h = i)
+  
+  fit <- auto.arima(samples$train)
+  
+  pred = forecast(fit, h = i)
+  
+  
+  plot_frame <- fcastdf(nBase_ts, pred)
+  
+  
+  
+  plot <- ggplot(data = plot_frame,aes(x = date, y = observed))
+  # plot <- plot + ylim(min(plot_frame$observed, na.rm = TRUE),
+  #                     555000)
+  plot <- plot + geom_line(size = 1.2)
+  plot <- plot + geom_point(size = 2)
+  plot <- plot + geom_ribbon(aes(ymin = lo95, ymax = hi95),
+                             alpha = 0.25,
+                             fill = "blue")
+  plot <- plot + geom_ribbon(aes(ymin = lo80, ymax = hi80),
+                             alpha = 0.25,
+                             fill = "blue")
+  plot <- plot + geom_line(aes(y = forecast), colour = "blue", size = 1.2)
+  plot <- plot + geom_line(aes(y = holdout), colour = "red", size = 1.2)
+  plot <- plot + scale_x_date(labels = date_format("%m-%Y"))
+  
+  plotList[[i]] <- plot
+  
+}
+map(plotList, print)
+dev.off()
+
+# Using plotting dataframe convenience function
+
+
+
+plot_frame <- fcastdf(nBase_ts, pred)
+
+
+plot <- ggplot(data = plot_frame,aes(x = date, y = observed))
+plot <- plot + geom_line(size = 1.2)
+plot <- plot + geom_point(size = 2)
+plot <- plot + geom_ribbon(aes(ymin = lo95, ymax = hi95),
+                           alpha = 0.25,
+                           fill = "blue")
+plot <- plot + geom_ribbon(aes(ymin = lo80, ymax = hi80),
+                           alpha = 0.25,
+                           fill = "blue")
+plot <- plot + geom_line(aes(y = forecast), colour = "blue", size = 1.2)
+plot <- plot + geom_line(aes(y = holdout), colour = "red", size = 1.2)
+
+plot <- plot + ylim(c(min(plot_frame$observed), max(plot_frame$forecast)))
+plot <- plot + scale_x_date(labels = date_format("%m-%Y"))
+
+plot
+
+
