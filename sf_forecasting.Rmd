@@ -113,11 +113,11 @@ query1 <- paste(
 
 ```
 
-
-
 # Introduction
 
-This report details time series analysis of sales within TRADE+ customer group. The data are first sourced from the Redpoint:
+This report details time series analysis of sales within NTS customer group.The main aim here is to create a forecast model that can extrapolate 15 months worth of sales. To achive this aim, we'll be using the Autoregressive Integrated Moving Average (ARIMA) model. 
+
+The data are first sourced from the Redpoint:
 
 ```{r}
 ### Grab data
@@ -168,7 +168,7 @@ autoplot(stl(sf_nts_ts/1E6,
              s.window = 'periodic')) + geom_point()
 ```
 
-These four plots represent the original data, the trend, the seasonality and the variance. These are important to consider as we commonly assume in many time series techniques (including ARIMA) is that the time series is stationary. This allows preserving model stability and provides a framework to 
+These four plots represent the original data, the trend, the seasonality and the variance. These factors will be important to consider as we commonly assume in many time series techniques (especially ARIMA) that the time series is stationary. 
 
-A stationary time series is one whose statistical properties such as mean, variance and correlation are all constant over time (i.e. to create the stationary time series, we need to minimise the trend, seasonality and variance). To 
+A stationary time series is one whose statistical properties such as mean, variance and correlation are all constant over time (i.e. to create the stationary time series, we need to minimise the trend, seasonality and variance). To achieve this we can apply differencing to our data or take logs.
 
