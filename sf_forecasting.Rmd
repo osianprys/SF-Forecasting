@@ -106,8 +106,7 @@ query1 <- paste(
    where 
       cal_submit_date between dateadd(month, - 48, '2018-04-01') and '2018-03-31'
       and rp_person_id > 0
-      and (kf_trade_split_validated = 'NTS'
-      or kf_trade_split_validated is null)
+      and brand_code in ('PLUMBFIX', 'ELECTRICFX')
    group by 1;"
 )
 
@@ -115,7 +114,17 @@ query1 <- paste(
 
 # Introduction
 
-This report details time series analysis of sales within NTS customer group.The main aim here is to create a forecast model that can extrapolate 15 months worth of sales. To achive this aim, we'll be using the Autoregressive Integrated Moving Average (ARIMA) model. 
+This report details time series analysis of sales within TRADE+ customer group.The main aim here is to create a forecast model that can extrapolate 15 months worth of sales. To achieve this aim, we'll be using the Autoregressive Integrated Moving Average (ARIMA) model. 
+
+The ARIMA model has three parameters which we should consider. They are usually denoted as ARIMA(p, d, q) where
+
+- p is the number of autoregressive terms.
+- d is the number of differences needed for stationarity.
+- q is the number of lagged forecast errors in the prediction equation.
+
+These parameters will be explained in more detail as we explore the data and apply statistical testing.
+
+# Exploratory Analysis
 
 The data are first sourced from the Redpoint:
 
@@ -135,40 +144,182 @@ dat <- dat %>%
 min_date <- min(dat$date)
 max_date <- max(dat$date)
 
+### Check data
 head(dat)
 ```
 
 After we re-order the data by date and extract the minimum and maximum date for our forecasting analysis. We can then represent this series in R using  `ts()`:
 ```{r}
-sf_nts_ts <- ts(data = dat$sales,
-                start = c(year(min_date), month(min_date)),
-                end = c(year(max_date), month(max_date)),
-                frequency = 12)
-
-sf_nts_ts
+## Create time series
+sf_tradeplus_ts <- ts(
+                      data = dat$sales,
+                      start = c(year(min_date), month(min_date)),
+                      end = c(year(max_date), month(max_date)),
+                      frequency = 12
+                      )
+  
+  sf_tradeplus_ts
 ```
 
-Notice the function requires start date (in `c(year, month)` format) and frequency which is always number of obvservations in a year.
+Notice the function requires both the start date and the end date (in `c(year, month)` format) and frequency which is always number of obvservations in a year.
 
 To visualise the data we plot the time series:
 
-```{r}
-# Raw sales plot - notice trend/seasonality/variance
-plot.xts(as.xts(sf_nts_ts/1E6),
+```{r figure.align = "center"}
+# Raw time-series plot - notice trend/seasonality/variance
+plot.xts(as.xts(sf_tradeplus_ts/1E6),
          type = "o",
          ylab = "Sum of Sales [£m]",
          xlab = "Date",
-         main = "NTS Sales Over Time")
+         main = "Trade+ Sales Over Time")
 ```
 
 We notice a positive trend with sales increasing over time. Seasonality (repeated periodic trends) is also apparent with characteristic dips across Dec-Feb and peaks across Oct-Nov. We can use time-series decompostion to examine these features using `stl()`  
 
 ```{r}
-autoplot(stl(sf_nts_ts/1E6,
+### plot stl
+autoplot(stl(sf_tradeplus_ts/1E6,
              s.window = 'periodic')) + geom_point()
 ```
 
-These four plots represent the original data, the trend, the seasonality and the variance. These factors will be important to consider as we commonly assume in many time series techniques (especially ARIMA) that the time series is stationary. 
+These four plots represent the original data, the trend, the seasonality and the remainder. These factors will be important to consider as we commonly assume in many time series techniques (especially ARIMA) that the time series is stationary. 
 
-A stationary time series is one whose statistical properties such as mean, variance and correlation are all constant over time (i.e. to create the stationary time series, we need to minimise the trend, seasonality and variance). To achieve this we can apply differencing to our data or take logs.
+(ADD A BIT MORE)
+
+A stationary time series is one whose statistical properties such as mean, variance and correlation are all constant over time (i.e. to create the stationary time series, we need to minimise the trend and seasonality variance). To achieve this we can apply differencing to our data. 
+
+```{r fig.height = 8, figure.align = "center"}
+# plotting parameters
+par(mfrow=c(4, 1),
+    oma = c(3, 2, 0, 0),
+    mar = c(0, 0 , 0, 1),
+    mgp = c(2, 1, 0),
+    xpd = FALSE)
+
+
+# Raw sales plot - notice trend/seasonality/variance
+plot.xts(as.xts(sf_tradeplus_ts/1E6),
+         type = "o",
+         ylab = "Sum of Sales [£m]",
+         xlab = "Date",
+         main = "Original Data")
+
+
+# Diff sales plot - notice increasing variance
+plot.xts(as.xts(diff(sf_tradeplus_ts/1E6)),
+         type = "o",
+         ylab = "Sum of Sales [£m]",
+         xlab = "Date",
+         main = "Differenced Data")
+
+
+# log sales plot - notice trend/seasonality/variance
+plot.xts(as.xts(log10(sf_tradeplus_ts/1E6)),
+         type = "o",
+         ylab = "Sum of Sales [£m]",
+         xlab = "Date",
+         main = "Log10 of Data")
+
+
+# Diff log sales plot - looks stationary
+plot.xts(as.xts(diff(log10(sf_tradeplus_ts/1E6))),
+         type = "o",
+         ylab = "Sum of Sales [£m]",
+         xlab = "Date",
+         main = "Differenced Log10 of Data")
+
+# add x-axis label
+title(xlab = "Date",
+      outer = TRUE, line = 0)
+
+
+```
+
+By differencing the data, we managed to create a time series with no clear sign of trend. Therefore we can depict that it looks stationary. We can also take logs as seen above on the bottom two figures which can also help to minimise variance.
+
+# Augmented Dickey-Fuller Test (ADF)
+
+We can test whether this time-series is stationary or not by performing the Augmented Dickey-Fuller Test (ADF). The ADF is a significance test where the alternative hypothesis is that the data are stationary. A significant p-value (less than 0.5) implies we can reject the null hypothesis that the data are not stationary. Below are the p-value results for running ADF on the raw, differenced, log-transformed and differenced log-transformed series.
+
+```{r warning=FALSE}
+# Testing Stationarity
+adf_raw <-  adf.test(sf_tradeplus_ts,
+                     alternative = "stationary")
+                     adf_diff <- adf.test(diff(sf_tradeplus_ts),
+                     alternative = "stationary")
+                     adf_log <-  adf.test(log10(sf_tradeplus_ts),
+                     alternative = "stationary")
+                     adf_diff_log <- adf.test(diff(log10(sf_tradeplus_ts)),
+                     alternative = "stationary")
+                     
+data.frame(row.names = "p_value",
+           raw = adf_raw$p.value,
+           diff_raw = adf_diff$p.value,
+           log = adf_log$p.value,
+           diff_log = adf_diff_log$p.value)
+
+```
+
+We have significant p-values for both the differenced and differenced log-transformed data. This implies that when we apply ARIMA, we will need to difference the data once and set d = 1. 
+
+# Autocorrelation Factor (ACF) and Partial Autocorrelation Factor (PACF) plots
+
+We now have learned that the original data needed to be differenced once to get a stationary time-series. Next we determine the other parameters by creating ACF and PACF plots
+
+```{r fig.width = 8}
+par(mfrow = c(1, 2))
+
+acf(diff(sf_tradeplus_ts))
+pacf(diff(sf_tradeplus_ts))
+```
+
+(NEED SOME TIME TO READ OVER ACF and PACF)
+
+# Autoregressive Integrated Moving Average (ARIMA)
+
+Fortunately there's a function called `auto.arima()` in R that does all of these checks above for us and automatically calculates the forecast. We will test this out on the 'holdout' set.
+
+```{r}
+# create test sample
+samples <- create_test_train(sf_tradeplus_ts, 15)
+
+# create arima model
+fit <- auto.arima(samples$train)
+fit
+```
+
+Note that `auto.arima()` used ARIMA(0,1,1) where p = 0, d = 1 and q = 1.
+
+```{r}
+
+# forecast predictions
+pred <- forecast(fit, h = 15)
+
+#plot forecast vs predictions
+ts.plot(
+        samples$train / 1E6,
+        pred$mean / 1E6,
+        samples$holdout / 1E6,
+        lty = c(1, 3, 5),
+        ylab = "Sum of Sales [£ M]",
+        main = "Sales Forecast per Month"
+  )
+legend("topleft", c("Training", "Forecast", "Actual"), lty  = c(1, 3, 5))
+
+# Look at accuracy
+accuracy(f = pred$mean, 
+         x = samples$holdout)
+
+# Difference %
+sum(pred$mean)/sum(samples$holdout) - 1 
+  
+```
+
+Finally we'll look at residuals with boxplot:
+
+```{r}
+boxplot(pred$residuals/1E6, ylab = "Residuals [M]")
+```
+
+
 
