@@ -171,6 +171,7 @@ plot.xts(as.xts(sf_tradeplus_ts/1E6),
          type = "o",
          ylab = "Sum of Sales [£m]",
          xlab = "Date",
+         ylim = c(10,50),
          main = "Trade+ Sales Over Time")
 ```
 
@@ -302,7 +303,7 @@ ts.plot(
         samples$holdout / 1E6,
         lty = c(1, 3, 5),
         ylab = "Sum of Sales [£ M]",
-        main = "Sales Forecast per Month"
+        main = "Trade+ Sales Monthly Forecast"
   )
 legend("topleft", c("Training", "Forecast", "Actual"), lty  = c(1, 3, 5))
 
@@ -312,6 +313,7 @@ accuracy(f = pred$mean,
 
 # Difference %
 sum(pred$mean)/sum(samples$holdout) - 1 
+(sum(pred$mean)-sum(samples$holdout))/samples$holdout
   
 ```
 
