@@ -211,39 +211,39 @@ n_15 = 15
 
 
 SPC_ts_list <- SPC_df %>%
-           split(.$base) %>%
-           map(., ~ts(.x$spc, start = c(year(min(.x$end)),
-                                 month(max(.x$end))),
-                   frequency = 12))
+               split(.$base) %>%
+               map(., ~ts(.x$spc, start = c(year(min(.x$end)),
+                                     month(max(.x$end))),
+                       frequency = 12))
 
 
 SPC_fit_list <- SPC_ts_list %>%
-            map(~auto.arima(.x))
+                map(~auto.arima(.x))
 
 SPC_fcast_list_15 <- SPC_fit_list %>%
-                 map(~forecast(.x, h = 15))
+                     map(~forecast(.x, h = n_15))
 
 
 
 SPC_tday_values <- map_df(map(SPC_fcast_list_15, "x"), ~tail(.x, 1)) %>%
-               gather(key = "Base", value = "SPC-Today")
+                   gather(key = "Base", value = "SPC-Today")
 
 
 SPC_fcast_values <- map_df(map(SPC_fcast_list_15, "mean"), ~tail(.x, 1)) %>%
-                gather(key = "Base", value = "SPC-15")
+                    gather(key = "Base", value = "SPC-15")
 
 SPC_fcast_upper <- map(map(SPC_fcast_list_15, "upper"), ~tail(.x, 1)) %>%
-               reduce(rbind) %>% 
-               as.data.frame()
+                   reduce(rbind) %>% 
+                   as.data.frame()
 
 
 SPC_fcast_table <- left_join(SPC_tday_values, SPC_fcast_values) %>%
-               cbind(., SPC_fcast_upper) %>%
-               mutate(SPC_Var95 = `95%` - `SPC-15`,
-                      'SPC_Growth-Percent' = 100*((`SPC-15`-`SPC-Today`)/`SPC-Today`)) %>%
-               select(-`80%`, -`95%`) %>%
-               map_if(is.numeric, ~round(.x, 2)) %>%
-               as.data.frame()
+                   cbind(., SPC_fcast_upper) %>%
+                   mutate(SPC_Var95 = `95%` - `SPC-15`,
+                          'SPC_Growth-Percent' = 100*((`SPC-15`-`SPC-Today`)/`SPC-Today`)) %>%
+                   select(-`80%`, -`95%`) %>%
+                   map_if(is.numeric, ~round(.x, 2)) %>%
+                   as.data.frame()
 
 
 
@@ -326,4 +326,9 @@ nBase_fcast_table <- left_join(nBase_tday_values, nBase_fcast_values) %>%
 
 # Joining SPC and nBase ---------------------------------------------------
 
-fcast_table <- left_join(SPC_fcast_table, nBase_fcast_table)
+fcast_table <- left_join(SPC_fcast_table, nBase_fcast_table,
+                         by = c("Base" = "Base")) %>%
+               select(Base,
+                      SPC.Today,
+                      nBase.Today,
+                      )
