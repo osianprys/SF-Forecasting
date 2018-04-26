@@ -203,16 +203,6 @@ next_fin_yr <- ifelse(tday > ymd(paste(year(tday), "02-01")),
                       ymd(paste(year(tday), "02-01"))) %>% as.Date()
 
 
-t15 <- tday + months(15) 
-  
-  
-fifteen_mn <- ymd(paste(year(t15),
-                        "-",
-                        month(t15), 
-                        "-01", sep = ""))
-
-
-
 n_fin_yr = length(seq.Date(from = tday,
                            to = next_fin_yr,
                            by = "month"))
@@ -237,24 +227,22 @@ fcast_list_15 <- fit_list %>%
 tail(fcast_list_15$TRADEPLUS$mean, 1)
 
 
+tday_values <- map_df(map(fcast_list_15, "x"), ~tail(.x, 1)) %>%
+               gather(key = "Base", value = "SPC-Today")
 
 
 fcast_values <- map_df(map(fcast_list_15, "mean"), ~tail(.x, 1)) %>%
-                gather(key = "base", value = "SPC")
+                gather(key = "Base", value = "SPC-15")
 
 fcast_upper <- map(map(fcast_list_15, "upper"), ~tail(.x, 1)) %>%
                reduce(rbind) %>% 
                as.data.frame()
 
-fcast_lower <- map(map(fcast_list_15, "lower"), ~tail(.x, 1)) %>%
-               reduce(rbind) %>% as.data.frame()
 
-
-names(fcast_upper) <- paste0("upper-", names(fcast_upper))
-names(fcast_lower) <- paste0("lower-", names(fcast_lower))
-
-
-fcast_table <- cbind(fcast_values, fcast_upper) %>%
-               mutate(var95 = `95%` - SPC) %>%
+fcast_table <- left_join(tday_values, fcast_values) %>%
+               cbind(., fcast_upper) %>%
+               mutate(Var95 = `95%` - `SPC-15`,
+                      'Growth-Percent' = 100*((`SPC-15`-`SPC-Today`)/`SPC-Today`)) %>%
                select(-`80%`, -`95%`) %>%
-               map_if(is.numeric, ~round(.x, 2)) %>% as.data.frame()
+               map_if(is.numeric, ~round(.x, 2)) %>%
+               as.data.frame()
