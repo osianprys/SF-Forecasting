@@ -42,22 +42,39 @@ library(scales)
 
 # Functions ---------------------------------------------------------------
 
-buildSPCQuery <- function(start, end, base = "TRADEPLUS"){
+buildSPCQuery <- function(start, end, base = c("TRADEPLUS",
+                                               "TRADE",
+                                               "B2B",
+                                               "NTS")){
   
   bcodes <- switch(base,
-                   TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
+                   TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')",
+                   TRADE = "and po.kf_trade_split_validated = 'Trade' and last_submit_brand not in ('PLUMBFIX', 'ELECTRICFX')",
+                   B2B = "and po.kf_trade_split_validated = 'B2B'",
+                   NTS = "and po.kf_trade_split_validated = 'NTS' or po.kf_trade_split_validated is null",
+                   )
   
-  qry <- paste(" select 
-                    sum(fulfilled_sales)/ (count(distinct rp_person_id)) 
-                      AS SPC
-                      from 
-                      sf_analytics.prod_order
-                      where cal_submit_date between '", start, "' and '", end,
-                      "'", bcodes )
+  qry <- paste("select
+                sum(fulfilled_sales)::float/count(distinct case when order_type = 'SALESORDER' then po.rp_person_id end)::float as spc
+                from sf_analytics.prod_order po
+                left join sf_analytics.prod_person pp
+                on po.rp_person_id = pp.rp_person_id
+                where
+                po.rp_person_id > 0
+                and
+                cal_submit_date between '", start, "' and '", end,
+                      "'", bcodes, " group by 1")
   qry
 }
 
-runSPCQuery <- function(start, end, base = "TRADEPLUS" conn){
+
+
+
+
+runSPCQuery <- function(start, end, base = c("TRADEPLUS",
+                                              "TRADE",
+                                              "B2B",
+                                              "NTS"), conn){
   qry <- buildSPCQuery(start, end, base)
   res <- dbGetQuery(conn, qry)
   res$start <- start
