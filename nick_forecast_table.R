@@ -40,6 +40,11 @@ if(!require(zoo)) {
 }
 library(zoo)
 
+if(!require(tidyr)){
+  install.packages("tidyr")
+}
+library(tidyr)
+
 # Functions ---------------------------------------------------------------
 
 buildSPCQuery <- function(start, end, base = c("TRADEPLUS",
@@ -51,7 +56,7 @@ buildSPCQuery <- function(start, end, base = c("TRADEPLUS",
                    TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')",
                    TRADE = "and po.kf_trade_split_validated = 'Trade' and last_submit_brand not in ('PLUMBFIX', 'ELECTRICFX')",
                    B2B = "and po.kf_trade_split_validated = 'B2B'",
-                   NTS = "and po.kf_trade_split_validated = 'NTS' or po.kf_trade_split_validated is null")
+                   NTS = "and po.kf_trade_split_validated = 'NTS'")
   
   qry <- paste("select
                sum(fulfilled_sales)::float/count(distinct case when order_type = 'SALESORDER' then po.rp_person_id end)::float as spc
@@ -163,3 +168,93 @@ conn <- DBI::dbConnect(
   password = password1
 )
 
+
+
+# SPC calculation ---------------------------------------------------------
+
+cbases <-  c("TRADEPLUS", "TRADE", "B2B", "NTS")
+
+# Create the date intervals overwhich the SPC calculation is performed
+
+dates <- create_query_dates(ymd("2014-12-01"),
+                            ymd("2018-01-01"),
+                            by = "month",
+                            window = "year") 
+
+SPC_df <- data.frame()
+
+for(base in cbases){
+  df <- map2(dates$start,
+             dates$end, ~runSPCQuery(.x, .y, base = base, conn)) %>%
+        reduce(rbind)
+  
+  df$base <- base
+  SPC_df <- rbind(SPC_df, df)
+}
+
+
+
+# SPC forecasts -----------------------------------------------------------
+
+tday <- today()
+
+next_fin_yr <- ifelse(tday > ymd(paste(year(tday), "02-01")),
+                      ymd(paste(year(tday + years(1)), "02-01")),
+                      ymd(paste(year(tday), "02-01"))) %>% as.Date()
+
+
+t15 <- tday + months(15) 
+  
+  
+fifteen_mn <- ymd(paste(year(t15),
+                        "-",
+                        month(t15), 
+                        "-01", sep = ""))
+
+
+
+n_fin_yr = length(seq.Date(from = tday,
+                           to = next_fin_yr,
+                           by = "month"))
+
+n_15 = 15
+
+
+ts_list <- SPC_df %>%
+           split(.$base) %>%
+           map(., ~ts(.x$spc, start = c(year(min(.x$end)),
+                                 month(max(.x$end))),
+                   frequency = 12))
+
+
+fit_list <- ts_list %>%
+            map(~auto.arima(.x))
+
+fcast_list_15 <- fit_list %>%
+                 map(~forecast(.x, h = 15))
+
+
+tail(fcast_list_15$TRADEPLUS$mean, 1)
+
+
+
+
+fcast_values <- map_df(map(fcast_list_15, "mean"), ~tail(.x, 1)) %>%
+                gather(key = "base", value = "SPC")
+
+fcast_upper <- map(map(fcast_list_15, "upper"), ~tail(.x, 1)) %>%
+               reduce(rbind) %>% 
+               as.data.frame()
+
+fcast_lower <- map(map(fcast_list_15, "lower"), ~tail(.x, 1)) %>%
+               reduce(rbind) %>% as.data.frame()
+
+
+names(fcast_upper) <- paste0("upper-", names(fcast_upper))
+names(fcast_lower) <- paste0("lower-", names(fcast_lower))
+
+
+fcast_table <- cbind(fcast_values, fcast_upper) %>%
+               mutate(var95 = `95%` - SPC) %>%
+               select(-`80%`, -`95%`) %>%
+               map_if(is.numeric, ~round(.x, 2)) %>% as.data.frame()
