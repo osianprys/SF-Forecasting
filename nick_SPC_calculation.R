@@ -51,8 +51,7 @@ buildSPCQuery <- function(start, end, base = c("TRADEPLUS",
                    TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')",
                    TRADE = "and po.kf_trade_split_validated = 'Trade' and last_submit_brand not in ('PLUMBFIX', 'ELECTRICFX')",
                    B2B = "and po.kf_trade_split_validated = 'B2B'",
-                   NTS = "and po.kf_trade_split_validated = 'NTS' or po.kf_trade_split_validated is null",
-                   )
+                   NTS = "and po.kf_trade_split_validated = 'NTS'")
   
   qry <- paste("select
                 sum(fulfilled_sales)::float/count(distinct case when order_type = 'SALESORDER' then po.rp_person_id end)::float as spc
@@ -63,7 +62,7 @@ buildSPCQuery <- function(start, end, base = c("TRADEPLUS",
                 po.rp_person_id > 0
                 and
                 cal_submit_date between '", start, "' and '", end,
-                      "'", bcodes, " group by 1")
+                      "'", bcodes)
   qry
 }
 
@@ -82,21 +81,33 @@ runSPCQuery <- function(start, end, base = c("TRADEPLUS",
   res
 }
 
-buildNBaseQuery <- function(start, end, base = "TRADEPLUS"){
+buildNBaseQuery <- function(start, end, base = c("TRADEPLUS",
+                                                 "TRADE",
+                                                 "B2B",
+                                                 "NTS")){
   bcodes <- switch(base,
-                   TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')")
+                   TRADEPLUS = "and brand_code in ('PLUMBFIX', 'ELECTRICFX')",
+                   TRADE = "and po.kf_trade_split_validated = 'Trade' and last_submit_brand not in ('PLUMBFIX', 'ELECTRICFX')",
+                   B2B = "and po.kf_trade_split_validated = 'B2B'",
+                   NTS = "and po.kf_trade_split_validated = 'NTS' or po.kf_trade_split_validated is null" )
   
   qry <- paste("select
-               count(distinct rp_person_id) as customers
-               from sf_analytics.prod_order
+               count(distinct case when order_type = 'SALESORDER' then po.rp_person_id end) as customers
+               from sf_analytics.prod_order po
+               left join sf_analytics.prod_person pp
+               on po.rp_person_id = pp.rp_person_id
                where
-               cal_submit_date between '", start, "' and '",  end,
+               po.rp_person_id > 0
+               and cal_submit_date between '", start, "' and '",  end,
                "'", bcodes )
   qry
 }
 
-runNBaseQuery <- function(start, end, base = "TRADEPLUS", conn){
-  qry <- buildNBaseQuery(start, end)
+runNBaseQuery <- function(start, end, base = c("TRADEPLUS",
+                                               "TRADE",
+                                               "B2B",
+                                               "NTS"), conn){
+  qry <- buildNBaseQuery(start, end, base)
   res <- dbGetQuery(conn, qry)
   res$start <- start
   res$end <- end
@@ -209,7 +220,29 @@ start_date = seq.Date(from = ymd("2014-12-01"),
 
 end_date = seq.Date(from = ymd("2015-12-01"),
                     to = ymd("2018-01-01"),
-                    by = "month")
+                    by = "month") - days(1)
+
+create_query_dates <- function(start,
+                               end,
+                               by = c("year", "month"),
+                               window = c("year", "month")) {
+
+  window = switch(window,
+                  year = years(1),
+                  month = months(1))
+  
+  start_date = seq.Date(from = start,
+                        to = end - window,
+                        by = by) 
+  
+  end_date = seq.Date(from = start + window,
+                      to = end,
+                      by = by) - days(1)
+  
+  dates <- list(start = start_date,
+                end = end_date)
+  
+}
 
 
 

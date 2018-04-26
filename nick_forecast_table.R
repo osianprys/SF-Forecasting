@@ -40,10 +40,10 @@ if(!require(zoo)) {
 }
 library(zoo)
 
-if(!require(tidyr)){
-  install.packages("tidyr")
+if(!require(tidyverse)){
+  install.packages("tidyverse")
 }
-library(tidyr)
+library(tidyverse)
 
 # Functions ---------------------------------------------------------------
 
@@ -177,7 +177,7 @@ cbases <-  c("TRADEPLUS", "TRADE", "B2B", "NTS")
 # Create the date intervals overwhich the SPC calculation is performed
 
 dates <- create_query_dates(ymd("2014-12-01"),
-                            ymd("2018-01-01"),
+                            ymd("2018-03-01"),
                             by = "month",
                             window = "year") 
 
@@ -210,39 +210,120 @@ n_fin_yr = length(seq.Date(from = tday,
 n_15 = 15
 
 
-ts_list <- SPC_df %>%
+SPC_ts_list <- SPC_df %>%
            split(.$base) %>%
            map(., ~ts(.x$spc, start = c(year(min(.x$end)),
                                  month(max(.x$end))),
                    frequency = 12))
 
 
-fit_list <- ts_list %>%
+SPC_fit_list <- SPC_ts_list %>%
             map(~auto.arima(.x))
 
-fcast_list_15 <- fit_list %>%
+SPC_fcast_list_15 <- SPC_fit_list %>%
                  map(~forecast(.x, h = 15))
 
 
-tail(fcast_list_15$TRADEPLUS$mean, 1)
 
-
-tday_values <- map_df(map(fcast_list_15, "x"), ~tail(.x, 1)) %>%
+SPC_tday_values <- map_df(map(SPC_fcast_list_15, "x"), ~tail(.x, 1)) %>%
                gather(key = "Base", value = "SPC-Today")
 
 
-fcast_values <- map_df(map(fcast_list_15, "mean"), ~tail(.x, 1)) %>%
+SPC_fcast_values <- map_df(map(SPC_fcast_list_15, "mean"), ~tail(.x, 1)) %>%
                 gather(key = "Base", value = "SPC-15")
 
-fcast_upper <- map(map(fcast_list_15, "upper"), ~tail(.x, 1)) %>%
+SPC_fcast_upper <- map(map(SPC_fcast_list_15, "upper"), ~tail(.x, 1)) %>%
                reduce(rbind) %>% 
                as.data.frame()
 
 
-fcast_table <- left_join(tday_values, fcast_values) %>%
-               cbind(., fcast_upper) %>%
-               mutate(Var95 = `95%` - `SPC-15`,
-                      'Growth-Percent' = 100*((`SPC-15`-`SPC-Today`)/`SPC-Today`)) %>%
+SPC_fcast_table <- left_join(SPC_tday_values, SPC_fcast_values) %>%
+               cbind(., SPC_fcast_upper) %>%
+               mutate(SPC_Var95 = `95%` - `SPC-15`,
+                      'SPC_Growth-Percent' = 100*((`SPC-15`-`SPC-Today`)/`SPC-Today`)) %>%
                select(-`80%`, -`95%`) %>%
                map_if(is.numeric, ~round(.x, 2)) %>%
                as.data.frame()
+
+
+
+# nBase calculation ---------------------------------------------------------
+
+cbases <-  c("TRADEPLUS", "TRADE", "B2B", "NTS")
+
+# Create the date intervals overwhich the SPC calculation is performed
+
+dates <- create_query_dates(ymd("2014-12-01"),
+                            ymd("2018-03-01"),
+                            by = "month",
+                            window = "year") 
+
+nBase_df <- data.frame()
+
+for(base in cbases){
+  df <- map2(dates$start,
+             dates$end, ~runNBaseQuery(.x, .y, base = base, conn)) %>%
+    reduce(rbind)
+  
+  df$base <- base
+  nBase_df <- rbind(nBase_df, df)
+}
+
+
+
+# nBase forecasts -----------------------------------------------------------
+
+tday <- today()
+
+next_fin_yr <- ifelse(tday > ymd(paste(year(tday), "02-01")),
+                      ymd(paste(year(tday + years(1)), "02-01")),
+                      ymd(paste(year(tday), "02-01"))) %>% as.Date()
+
+
+n_fin_yr = length(seq.Date(from = tday,
+                           to = next_fin_yr,
+                           by = "month"))
+
+n_15 = 15
+
+
+nBase_ts_list <- nBase_df %>%
+                 split(.$base) %>%
+                 map(., ~ts(.x$customers,
+                            start = c(year(min(.x$end)), month(max(.x$end))),
+                            frequency = 12))
+
+
+nBase_fit_list <- nBase_ts_list %>%
+                  map(~auto.arima(.x))
+
+nBase_fcast_list_15 <- nBase_fit_list %>%
+                       map(~forecast(.x, h = 15))
+
+
+
+nBase_tday_values <- map_df(map(nBase_fcast_list_15, "x"), ~tail(.x, 1)) %>%
+                     gather(key = "Base", value = "nBase-Today")
+
+
+nBase_fcast_values <- map_df(map(nBase_fcast_list_15, "mean"), ~tail(.x, 1)) %>%
+                      gather(key = "Base", value = "nBase-15")
+
+nBase_fcast_upper <- map(map(nBase_fcast_list_15, "upper"), ~tail(.x, 1)) %>%
+                     reduce(rbind) %>% 
+                     as.data.frame()
+
+
+nBase_fcast_table <- left_join(nBase_tday_values, nBase_fcast_values) %>%
+                     cbind(., nBase_fcast_upper) %>%
+                     mutate(nBase_Var95 = `95%` - `nBase-15`,
+                            'nBase_Growth-Percent' = 100*((`nBase-15`-`nBase-Today`)/`nBase-Today`)) %>%
+                     select(-`80%`, -`95%`) %>%
+                     map_if(is.numeric, ~round(.x, 2)) %>%
+                     as.data.frame()
+
+
+
+# Joining SPC and nBase ---------------------------------------------------
+
+fcast_table <- left_join(SPC_fcast_table, nBase_fcast_table)
