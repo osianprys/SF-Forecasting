@@ -47,6 +47,8 @@ library(tidyverse)
 
 # Functions ---------------------------------------------------------------
 
+
+# function to build queries for SPC given a start/end date and customer base
 buildSPCQuery <- function(start, end, base = c("TRADEPLUS",
                                                "TRADE",
                                                "B2B",
@@ -74,7 +76,7 @@ buildSPCQuery <- function(start, end, base = c("TRADEPLUS",
 
 
 
-
+# This function will call the build query function and run the query - storing the results
 runSPCQuery <- function(start, end, base = c("TRADEPLUS",
                                               "TRADE",
                                               "B2B",
@@ -83,9 +85,13 @@ runSPCQuery <- function(start, end, base = c("TRADEPLUS",
   res <- dbGetQuery(conn, qry)
   res$start <- start
   res$end <- end
+  res$base <- base
   res
 }
 
+
+
+# function to build queries for customer base size given a start/end date and customer base
 buildNBaseQuery <- function(start, end, base = c("TRADEPLUS",
                                                  "TRADE",
                                                  "B2B",
@@ -108,6 +114,7 @@ buildNBaseQuery <- function(start, end, base = c("TRADEPLUS",
   qry
 }
 
+# This function will call the build query function and run the query - storing the results
 runNBaseQuery <- function(start, end, base = c("TRADEPLUS",
                                                "TRADE",
                                                "B2B",
@@ -116,9 +123,15 @@ runNBaseQuery <- function(start, end, base = c("TRADEPLUS",
   res <- dbGetQuery(conn, qry)
   res$start <- start
   res$end <- end
+  res$base <- base
   res
 }
 
+
+# Function to create list of start and end date sequences. Each element
+# of start and end represent the start and end of one calculation window. 
+# The window size is set using `window` argument and the rolling step size is 
+# set with the `by` argument
 create_query_dates <- function(start,
                                end,
                                by = c("year", "month"),
@@ -172,7 +185,10 @@ conn <- DBI::dbConnect(
 
 # SPC calculation ---------------------------------------------------------
 
-cbases <-  c("TRADEPLUS", "TRADE", "B2B", "NTS")
+cbases <-  list(TRADEPLUS = "TRADEPLUS",
+                TRADE = "TRADE",
+                B2B ="B2B",
+                NTS = "NTS")
 
 # Create the date intervals overwhich the SPC calculation is performed
 
@@ -181,17 +197,19 @@ dates <- create_query_dates(ymd("2014-12-01"),
                             by = "month",
                             window = "year") 
 
-SPC_df <- data.frame()
 
-for(base in cbases){
-  df <- map2(dates$start,
-             dates$end, ~runSPCQuery(.x, .y, base = base, conn)) %>%
-        reduce(rbind)
-  
-  df$base <- base
-  SPC_df <- rbind(SPC_df, df)
-}
+# Map construct to query and return SPC for each customer base (`cbase`) over each 
+# calculation window in `dates`.
+# For each element is `cbase` the pmap performs the query over all of `start`
+# and `end` and using `reduce(rbind)` binds the results into a single df.
 
+SPC_df <- cbases %>% 
+          map_df(~pmap_df(list(dates$start,
+                               dates$end),
+                               function(x, y) {runSPCQuery(as.Date(x),
+                                                           as.Date(y),
+                                                           base = .x,
+                                                           conn)})) 
 
 
 # SPC forecasts -----------------------------------------------------------
@@ -240,7 +258,8 @@ SPC_fcast_upper <- map(map(SPC_fcast_list_15, "upper"), ~tail(.x, 1)) %>%
 SPC_fcast_table <- left_join(SPC_tday_values, SPC_fcast_values) %>%
                    cbind(., SPC_fcast_upper) %>%
                    mutate(SPC_Var95 = `95%` - `SPC-15`,
-                          'SPC_Growth-Percent' = 100*((`SPC-15`-`SPC-Today`)/`SPC-Today`)) %>%
+                          'SPC_Growth-Percent' =
+                            100*((`SPC-15`-`SPC-Today`)/`SPC-Today`)) %>%
                    select(-`80%`, -`95%`) %>%
                    map_if(is.numeric, ~round(.x, 2)) %>%
                    as.data.frame()
@@ -258,16 +277,19 @@ dates <- create_query_dates(ymd("2014-12-01"),
                             by = "month",
                             window = "year") 
 
-nBase_df <- data.frame()
+# Map construct to query and return customer base size for each  
+# customer base (`cbase`) over each calculation window in `dates`.
+# For each element is `cbase` the pmap performs the query over all of `start`
+# and `end` and using `reduce(rbind)` binds the results into a single df.
 
-for(base in cbases){
-  df <- map2(dates$start,
-             dates$end, ~runNBaseQuery(.x, .y, base = base, conn)) %>%
-    reduce(rbind)
-  
-  df$base <- base
-  nBase_df <- rbind(nBase_df, df)
-}
+nBase_df <- cbases %>% 
+            map_df(~pmap_df(list(dates$start,
+                                 dates$end),
+                                 function(x, y) {runNBaseQuery(as.Date(x),
+                                                               as.Date(y),
+                                                               base = .x,
+                                                               conn)})) 
+
 
 
 
@@ -317,7 +339,8 @@ nBase_fcast_upper <- map(map(nBase_fcast_list_15, "upper"), ~tail(.x, 1)) %>%
 nBase_fcast_table <- left_join(nBase_tday_values, nBase_fcast_values) %>%
                      cbind(., nBase_fcast_upper) %>%
                      mutate(nBase_Var95 = `95%` - `nBase-15`,
-                            'nBase_Growth-Percent' = 100*((`nBase-15`-`nBase-Today`)/`nBase-Today`)) %>%
+                            'nBase_Growth-Percent' =
+                             100*((`nBase-15`-`nBase-Today`)/`nBase-Today`)) %>%
                      select(-`80%`, -`95%`) %>%
                      map_if(is.numeric, ~round(.x, 2)) %>%
                      as.data.frame()
