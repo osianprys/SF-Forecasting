@@ -1,5 +1,6 @@
 
 library(shiny)
+library(lubridate)
 
 # Define UI for application that draws a histogram
 fluidPage(
@@ -11,7 +12,11 @@ fluidPage(
   sidebarLayout(
     sidebarPanel(
     dateRangeInput("dateRange",
-                   "Select Dates"),
+                   "Select Dates",
+                   start = ymd("2015-01-01"),
+                   end = ymd("2016-01-01"),
+                   min = ymd("2014-12-01"),
+                   max = ymd("2018-02-28")),
     selectInput("cbase",
                 "Customer Base:",
                 choices = c("TRADEPLUS", "TRADE", "B2B", "NTS"),
