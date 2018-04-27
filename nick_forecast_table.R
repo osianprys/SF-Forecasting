@@ -354,4 +354,9 @@ fcast_table <- left_join(SPC_fcast_table, nBase_fcast_table,
                select(Base,
                       SPC.Today,
                       nBase.Today,
-                      )
+                      SPC.15,
+                      nBase.15,
+                      SPC_Var95,
+                      nBase_Var95,
+                      SPC_Growth.Percent,
+                      nBase_Growth.Percent)
