@@ -34,7 +34,8 @@ fluidPage(
     
     # Show a plot of the generated distribution
     mainPanel(
-      plotOutput("fcastPlot")
+      plotOutput("fcastPlot"),
+      dataTableOutput("metrictable")
     )
   )
 )
